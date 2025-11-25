@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>庫存管家 V5</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translate(-50%, 20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }
+        body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+        input, select, button { outline: none; }
+        
+        /* 讀取中遮罩 */
+        #loading-screen { position: fixed; inset: 0; background: white; z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 10px; }
+        
+        /* 登入遮罩 (最高層級) */
+        #login-screen { 
+            position: fixed; inset: 0; background: #f3f4f6; z-index: 9999; 
+            display: flex; justify-content: center; align-items: center; 
+            flex-direction: column;
+        }
+
+        /* Modal */
+        .modal-overlay { 
+            position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; 
+            display: flex; align-items: center; justify-content: center; 
+            padding: 1rem;
+        }
+        .modal-content { 
+            background: white; 
+            width: 90%; 
+            max-width: 24rem; 
+            margin: auto; 
+            border-radius: 0.75rem; 
+            display: flex; flex-direction: column; 
+            max-height: 85vh; 
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); 
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col font-sans text-gray-800 overflow-hidden">
+
+    <!-- 🔐 登入畫面 (V5 新增) -->
+    <div id="login-screen">
+        <div class="bg-white p-8 rounded-2xl shadow-xl w-80 text-center">
+            <div class="mb-6">
+                <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto text-2xl">
+                    <i class="fas fa-lock"></i>
+                </div>
+            </div>
+            <h2 class="text-xl font-bold text-gray-800 mb-2">請輸入密碼</h2>
+            <p class="text-xs text-gray-400 mb-6">此頁面僅限授權人員訪問</p>
+            
+            <input type="tel" id="login-pass" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-center text-xl font-bold tracking-widest mb-4 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="••••" maxlength="8">
+            
+            <button onclick="checkLogin()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg active:scale-95 transition-transform">
+                解鎖進入
+            </button>
+            <p id="login-error" class="text-red-500 text-xs mt-3 hidden"><i class="fas fa-exclamation-circle"></i> 密碼錯誤</p>
+        </div>
+    </div>
+
+    <!-- 讀取畫面 -->
+    <div id="loading-screen" style="display: none;"> <!-- 預設隱藏，登入後才顯示 -->
+        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-600"></i>
+        <p class="text-gray-500 text-sm">正在連線至雲端資料庫...</p>
+        <p class="text-gray-400 text-xs mt-4">V5.0 驗證成功</p>
+    </div>
+
+    <!-- 頂部標題 -->
+    <div class="bg-white p-3 shadow-sm z-20 flex-none">
+        <div class="flex justify-between items-center">
+            <h1 class="text-xl font-extrabold text-gray-800 tracking-tight flex items-center gap-2">
+                <i class="fas fa-cloud text-blue-500"></i> 庫存管家
+            </h1>
+            <div id="connection-status" class="text-xs text-green-500 font-bold flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> 連線中
+            </div>
+        </div>
+    </div>
+
+    <!-- 浮動通知區 -->
+    <div id="notification-area" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 pointer-events-none w-full max-w-xs flex flex-col items-center"></div>
+
+    <!-- 主要內容區 -->
+    <div id="main-content" class="flex-1 overflow-y-auto p-4 pb-24 relative max-w-2xl mx-auto w-full hidden"></div>
+
+    <!-- 底部導航欄 -->
+    <div class="bg-white border-t border-gray-200 px-2 py-2 flex justify-between items-center fixed bottom-0 w-full left-0 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] text-xs">
+        
+        <button onclick="switchTab('shopping')" id="nav-shopping" class="nav-btn flex flex-col items-center gap-1 py-2 w-1/4 text-blue-600 relative">
+            <div class="relative">
+                <i class="fas fa-shopping-cart text-xl mb-0.5"></i>
+                <span id="badge-count" class="hidden absolute -top-1 -right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-white">0</span>
+            </div>
+            <span>待買</span>
+        </button>
+
+        <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-btn flex flex-col items-center gap-1 py-2 w-1/4 text-gray-400">
+            <i class="fas fa-boxes text-xl mb-0.5"></i>
+            <span>庫存</span>
+        </button>
+        
+        <button onclick="switchTab('history')" id="nav-history" class="nav-btn flex flex-col items-center gap-1 py-2 w-1/4 text-gray-400">
+            <i class="fas fa-history text-xl mb-0.5"></i>
+            <span>紀錄</span>
+        </button>
+        
+        <button onclick="switchTab('admin')" id="nav-admin" class="nav-btn flex flex-col items-center gap-1 py-2 w-1/4 text-gray-400">
+            <i class="fas fa-cog text-xl mb-0.5"></i>
+            <span>管理</span>
+        </button>
+    </div>
+
+    <!-- 引入 Firebase -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, doc, updateDoc, addDoc, deleteDoc, setDoc, serverTimestamp, orderBy, query, limit, getDocs, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // ============================================================
+        // 🔐 【V5 安全設定】
+        // ============================================================
+        const APP_PASSWORD = "2169"; // 請在此修改您的密碼
+        // ============================================================
+
+        // 登入邏輯
+        window.checkLogin = () => {
+            const input = document.getElementById('login-pass');
+            const error = document.getElementById('login-error');
+            
+            if (input.value === APP_PASSWORD) {
+                // 密碼正確
+                document.getElementById('login-screen').style.display = 'none'; // 隱藏登入頁
+                document.getElementById('loading-screen').style.display = 'flex'; // 顯示讀取頁
+                initApp(); // 開始連線資料庫
+                // 儲存簡單的 Session (關閉瀏覽器即失效)
+                sessionStorage.setItem('isLoggedIn', 'true');
+            } else {
+                // 密碼錯誤
+                error.classList.remove('hidden');
+                input.value = '';
+                input.focus();
+            }
+        };
+
+        // 按下 Enter 也可以登入
+        document.getElementById('login-pass').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') window.checkLogin();
+        });
+
+        // 檢查是否已經登入過 (重新整理時不用重打密碼)
+        if (sessionStorage.getItem('isLoggedIn') === 'true') {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('loading-screen').style.display = 'flex';
+            initApp();
+        }
+
+        // ============================================================
+        // ⚠️【請將這裡替換成您自己的 Firebase Config】⚠️
+        // ============================================================
+        const firebaseConfig = {
+                apiKey: "AIzaSyBXMjjqMz6JVkyACvndahKeKTGHRmeVZ8Q",
+                authDomain: "mystockapp-b9c09.firebaseapp.com",
+                projectId: "mystockapp-b9c09",
+                storageBucket: "mystockapp-b9c09.firebasestorage.app",
+                messagingSenderId: "689745750650",
+                appId: "1:689745750650:web:aefb53067629476bcda9c3",
+                measurementId: "G-4YHP7NFQ73"
+        };
+        // ============================================================
+
+        let db; // 全域 DB 變數
+
+        function initApp() {
+            // 檢查是否已設定 Config
+            if (Object.keys(firebaseConfig).length === 0) {
+                document.getElementById('loading-screen').innerHTML = `
+                    <div class="p-8 text-center">
+                        <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
+                        <h2 class="text-xl font-bold mb-2">尚未設定資料庫</h2>
+                        <p class="text-sm text-gray-600 mb-4">請使用記事本開啟此檔案，並在第 155 行貼上您的 Firebase Config。</p>
+                        <button onclick="location.reload()" class="bg-blue-600 text-white px-4 py-2 rounded-lg">我已設定好，重新整理</button>
+                    </div>
+                `;
+                throw new Error("No Config");
+            }
+
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            
+            startListeners(); // 開始監聽資料
+        }
+        
+        window.state = {
+            activeTab: 'shopping',
+            inventory: [],
+            logs: [],
+            lastStocktake: null,
+            searchTerm: '',
+            selectedCategory: '全部',
+            editingId: null,
+            editForm: {},
+            showStats: false,
+            statsData: [],
+            statsFilter: {
+                start: '',
+                end: '',
+                type: 'all',
+                value: ''
+            }
+        };
+
+        const INVENTORY_COLLECTION = 'inventory_items';
+        const LOGS_COLLECTION = 'inventory_logs';
+        const SETTINGS_COLLECTION = 'settings'; 
+
+        // --- 監聽資料庫 ---
+        function startListeners() {
+            const qInventory = query(collection(db, INVENTORY_COLLECTION));
+            onSnapshot(qInventory, (snapshot) => {
+                const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                items.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.name || '').localeCompare(b.name || ''));
+                window.state.inventory = items;
+                checkLoadComplete();
+                window.render();
+            }, (err) => {
+                console.error(err);
+                alert("連線錯誤，請檢查 Config");
+            });
+
+            const qLogs = query(collection(db, LOGS_COLLECTION), orderBy("timestamp", "desc"), limit(50));
+            onSnapshot(qLogs, (snapshot) => {
+                const logs = snapshot.docs.map(d => {
+                    const data = d.data();
+                    let timeStr = '';
+                    if (data.timestamp) {
+                        const date = data.timestamp.toDate();
+                        timeStr = date.toLocaleString('zh-TW', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' });
+                    }
+                    return { id: d.id, ...data, timeStr };
+                });
+                window.state.logs = logs;
+                checkLoadComplete();
+                window.render();
+            });
+
+            onSnapshot(doc(db, SETTINGS_COLLECTION, 'general'), (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    if (data.lastStocktake) {
+                        const date = data.lastStocktake.toDate();
+                        window.state.lastStocktake = date.toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' });
+                    }
+                }
+                window.render(); 
+            });
+        }
+
+        function checkLoadComplete() {
+            document.getElementById('loading-screen').style.display = 'none';
+            document.getElementById('main-content').classList.remove('hidden');
+        }
+
+        // --- 操作功能 ---
+        window.updateStocktakeDate = async () => {
+            if(!confirm("確定已完成所有商品盤點？這將更新最後盤點日期。")) return;
+            try {
+                await setDoc(doc(db, SETTINGS_COLLECTION, 'general'), {
+                    lastStocktake: serverTimestamp()
+                }, { merge: true });
+                showNotification("盤點日期已更新！");
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch(e) {
+                console.error(e);
+                alert("更新失敗");
+            }
+        };
+
+        window.updateStock = async (id, changeAmount, reason = '手動調整') => {
+            const item = window.state.inventory.find(i => i.id === id);
+            if (!item) return;
+            const newStock = Math.max(0, (item.stock || 0) + parseInt(changeAmount));
+
+            try {
+                const itemRef = doc(db, INVENTORY_COLLECTION, id);
+                await updateDoc(itemRef, { stock: newStock });
+
+                await addDoc(collection(db, LOGS_COLLECTION), {
+                    itemId: id,
+                    itemName: item.name,
+                    category: item.category,
+                    change: parseInt(changeAmount),
+                    finalStock: newStock,
+                    reason: reason,
+                    timestamp: serverTimestamp()
+                });
+
+                if (changeAmount > 0) showNotification(`已補貨: ${item.name} +${changeAmount}`);
+            } catch (e) {
+                console.error(e);
+                alert("更新失敗");
+            }
+        };
+
+        window.buyCustomQty = (id) => {
+            const input = document.getElementById(`qty-${id}`);
+            const qty = parseInt(input.value);
+            if(isNaN(qty) || qty <= 0) {
+                alert("請輸入正確數量");
+                return;
+            }
+            window.updateStock(id, qty, '採購補貨');
+        };
+
+        window.deleteLog = async (logId) => {
+            if(!confirm("確定要刪除這條紀錄嗎？")) return;
+            try {
+                await deleteDoc(doc(db, LOGS_COLLECTION, logId));
+                showNotification("紀錄已刪除");
+            } catch(e) {
+                alert("刪除失敗");
+            }
+        };
+
+        // --- 統計報表功能 ---
+        window.updateStatsType = (type) => {
+            window.state.statsFilter.type = type;
+            if(type === 'category') {
+                const cats = [...new Set(window.state.inventory.map(i => i.category))];
+                window.state.statsFilter.value = cats.length > 0 ? cats[0] : '';
+            } else if(type === 'item') {
+                 const items = window.state.inventory.map(i => i.name).sort();
+                window.state.statsFilter.value = items.length > 0 ? items[0] : '';
+            } else {
+                window.state.statsFilter.value = '';
+            }
+            window.render();
+        };
+
+        window.updateStatsValue = (val) => {
+            window.state.statsFilter.value = val;
+        };
+
+        window.openStats = async () => {
+            const today = new Date();
+            const lastMonth = new Date();
+            lastMonth.setDate(today.getDate() - 30);
+            const fmt = (d) => d.toISOString().split('T')[0];
+            
+            window.state.statsFilter = {
+                start: fmt(lastMonth),
+                end: fmt(today),
+                type: 'all',
+                value: ''
+            };
+            
+            window.state.showStats = true;
+            window.state.statsData = null; 
+            window.render();
+            window.runStatsQuery();
+        };
+
+        window.runStatsQuery = async () => {
+            try {
+                window.state.statsData = null; 
+                window.render();
+
+                const q = query(collection(db, LOGS_COLLECTION), orderBy("timestamp", "desc"), limit(1000));
+                const snapshot = await getDocs(q);
+                
+                const filter = window.state.statsFilter;
+                const startDate = new Date(filter.start);
+                startDate.setHours(0,0,0,0);
+                const endDate = new Date(filter.end);
+                endDate.setHours(23,59,59,999);
+
+                const statsMap = {}; 
+
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if(!data.timestamp) return;
+                    
+                    const date = data.timestamp.toDate();
+                    
+                    if(date < startDate || date > endDate) return;
+
+                    if (filter.type === 'category') {
+                        let cat = data.category;
+                        if (!cat) {
+                            const found = window.state.inventory.find(i => i.name === data.itemName);
+                            if(found) cat = found.category;
+                        }
+                        if (cat !== filter.value) return;
+                    } else if (filter.type === 'item') {
+                        if (data.itemName !== filter.value) return;
+                    }
+
+                    const dateStr = date.toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' });
+                    const key = `${dateStr}_${data.itemName}`;
+
+                    if(!statsMap[key]) {
+                        statsMap[key] = { date: dateStr, name: data.itemName, in: 0, out: 0, sortDate: date.getTime() };
+                    }
+
+                    if(data.change > 0) statsMap[key].in += data.change;
+                    else statsMap[key].out += Math.abs(data.change);
+                });
+
+                const result = Object.values(statsMap).sort((a, b) => b.sortDate - a.sortDate);
+                
+                window.state.statsData = result;
+                window.render();
+            } catch(e) {
+                console.error(e);
+                alert("統計失敗");
+                window.state.statsData = [];
+                window.render();
+            }
+        };
+
+        window.closeStats = () => {
+            window.state.showStats = false;
+            window.render();
+        }
+
+        // --- 管理功能 ---
+        window.openEditModal = (itemStr = null) => {
+            if (itemStr) {
+                const item = typeof itemStr === 'string' ? JSON.parse(decodeURIComponent(itemStr)) : itemStr;
+                window.state.editingId = item.id;
+                window.state.editForm = { ...item };
+            } else {
+                window.state.editingId = 'NEW';
+                window.state.editForm = { category: '日常', name: '', stock: 0, safety: 1, unit: '個' };
+            }
+            window.render();
+        };
+
+        window.saveEdit = async () => {
+            const form = window.state.editForm;
+            if(!form.name) return alert("請輸入名稱");
+            
+            const dataToSave = {
+                category: form.category,
+                name: form.name,
+                stock: parseInt(form.stock || 0),
+                safety: parseInt(form.safety || 1),
+                unit: form.unit || '個'
+            };
+
+            try {
+                if (window.state.editingId === 'NEW') {
+                    await addDoc(collection(db, INVENTORY_COLLECTION), dataToSave);
+                    showNotification("已新增商品");
+                } else {
+                    await updateDoc(doc(db, INVENTORY_COLLECTION, window.state.editingId), dataToSave);
+                    showNotification("已更新商品");
+                }
+                window.state.editingId = null;
+                window.state.editForm = {};
+                window.render();
+            } catch(e) { console.error(e); alert("儲存失敗"); }
+        };
+
+        window.cancelEdit = () => {
+            window.state.editingId = null;
+            window.state.editForm = {};
+            window.render();
+        };
+
+        window.deleteItem = async (id) => {
+            if(confirm("確定要刪除此商品嗎？")) {
+                try {
+                    await deleteDoc(doc(db, INVENTORY_COLLECTION, id));
+                    showNotification("已刪除");
+                } catch(e) { alert("刪除失敗"); }
+            }
+        };
+
+        // --- UI 渲染邏輯 ---
+        window.switchTab = (tab) => {
+            window.state.activeTab = tab;
+            window.render();
+        };
+
+        function showNotification(msg) {
+            const area = document.getElementById('notification-area');
+            const el = document.createElement('div');
+            el.className = 'bg-gray-800 text-white px-4 py-2 rounded-full shadow-lg text-sm mb-2 animate-fade-in-up flex items-center gap-2';
+            el.innerHTML = `<i class="fas fa-check-circle text-green-400"></i> ${msg}`;
+            area.appendChild(el);
+            setTimeout(() => el.remove(), 2500);
+        }
+
+        window.render = () => {
+            const state = window.state;
+            const mainContent = document.getElementById('main-content');
+            
+            const toBuyCount = state.inventory.filter(i => (i.stock||0) <= (i.safety||0)).length;
+            const badge = document.getElementById('badge-count');
+            if(toBuyCount > 0) { badge.innerText = toBuyCount; badge.classList.remove('hidden'); }
+            else { badge.classList.add('hidden'); }
+
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.className = btn.className.replace('text-blue-600', 'text-gray-400');
+            });
+            document.getElementById(`nav-${state.activeTab}`).className = document.getElementById(`nav-${state.activeTab}`).className.replace('text-gray-400', 'text-blue-600');
+
+            let html = '';
+
+            if (state.activeTab === 'shopping') {
+                const toBuy = state.inventory.filter(i => (i.stock||0) <= (i.safety||0));
+                html += `
+                    <div class="bg-blue-600 text-white p-4 rounded-xl shadow-md mb-4 flex justify-between items-center">
+                        <div>
+                            <h2 class="font-bold text-lg">待買清單</h2>
+                            <p class="text-xs text-blue-100">可編輯數量後買入</p>
+                        </div>
+                        <div class="text-2xl font-bold opacity-20"><i class="fas fa-shopping-basket"></i></div>
+                    </div>
+                    <div class="grid gap-3">
+                        ${toBuy.length === 0 ? `
+                            <div class="text-center py-12 text-gray-400 flex flex-col items-center">
+                                <i class="fas fa-check-circle text-4xl mb-2 text-green-300"></i>
+                                庫存充足
+                            </div>` : ''}
+                        ${toBuy.map(item => {
+                            const diff = (item.safety||0) - (item.stock||0) + 1;
+                            return `
+                            <div class="bg-white p-3 rounded-xl shadow-sm flex flex-col gap-2">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="font-bold text-gray-800">${item.name}</div>
+                                        <div class="text-xs text-red-500 font-bold mt-1">缺 ${(item.safety||0) - (item.stock||0)}</div>
+                                    </div>
+                                    <div class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">${item.category}</div>
+                                </div>
+                                <div class="flex items-center gap-2 mt-1 pt-2 border-t border-gray-100">
+                                    <div class="flex items-center bg-gray-50 rounded-lg px-2 border border-gray-200">
+                                        <span class="text-xs text-gray-400 mr-2">買</span>
+                                        <input type="number" id="qty-${item.id}" value="${diff}" class="w-12 bg-transparent text-center font-bold py-1.5 text-sm outline-none" onclick="this.select()">
+                                        <span class="text-xs text-gray-400 ml-1">${item.unit}</span>
+                                    </div>
+                                    <button onclick="window.buyCustomQty('${item.id}')" class="flex-1 bg-green-500 text-white py-2 rounded-lg text-sm font-bold shadow-sm active:scale-95 flex justify-center items-center gap-2">
+                                        <i class="fas fa-cart-plus"></i> 入庫
+                                    </button>
+                                </div>
+                            </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+
+            else if (state.activeTab === 'inventory') {
+                const categories = ['全部', ...new Set(state.inventory.map(i => i.category))];
+                const filtered = state.inventory.filter(item => {
+                    const matchSearch = (item.name || '').toLowerCase().includes(state.searchTerm.toLowerCase());
+                    const matchCat = state.selectedCategory === '全部' || item.category === state.selectedCategory;
+                    return matchSearch && matchCat;
+                });
+
+                html += `
+                    <div class="px-1 mb-2 flex justify-between items-end">
+                         <div class="text-gray-500 text-sm font-bold">
+                            最後盤點：<span class="text-blue-600 text-lg">${state.lastStocktake || "--/--"}</span>
+                        </div>
+                    </div>
+
+                    <div class="sticky top-0 bg-gray-100 z-10 pb-2 space-y-2">
+                        <div class="relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                            <input type="text" placeholder="搜尋品名..." value="${state.searchTerm}" 
+                                oninput="window.state.searchTerm=this.value; window.render()"
+                                class="w-full pl-10 pr-4 py-2 bg-white rounded-xl shadow-sm border-none text-sm">
+                        </div>
+                        <div class="flex gap-2 overflow-x-auto no-scrollbar">
+                            ${categories.map(cat => `
+                                <button onclick="window.state.selectedCategory='${cat}'; window.render()"
+                                    class="px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${state.selectedCategory === cat ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 shadow-sm'}">
+                                    ${cat}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="grid gap-3 pb-4">
+                        ${filtered.length === 0 ? '<div class="text-center text-gray-400 py-10">無相關商品</div>' : ''}
+                        ${filtered.map(item => {
+                            const isLow = (item.stock||0) <= (item.safety||0);
+                            return `
+                            <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 ${isLow ? 'border-red-500' : 'border-green-500'} flex justify-between items-center">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-bold">${item.category}</span>
+                                        ${isLow ? '<span class="text-[10px] bg-red-100 text-red-500 px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 補貨</span>' : ''}
+                                    </div>
+                                    <h3 class="font-bold text-gray-800">${item.name}</h3>
+                                    <div class="text-xs text-gray-400 mt-0.5">安全: ${item.safety} ${item.unit}</div>
+                                </div>
+                                <div class="flex items-center gap-3 bg-gray-50 p-1.5 rounded-lg">
+                                    <button onclick="window.updateStock('${item.id}', -1)" class="w-8 h-8 flex items-center justify-center bg-white shadow-sm rounded-lg active:scale-90 transition-transform"><i class="fas fa-minus text-gray-600 text-xs"></i></button>
+                                    <span class="w-6 text-center font-bold ${isLow ? 'text-red-600' : 'text-gray-800'}">${item.stock}</span>
+                                    <button onclick="window.updateStock('${item.id}', 1)" class="w-8 h-8 flex items-center justify-center bg-blue-600 shadow-md rounded-lg active:scale-90 transition-transform"><i class="fas fa-plus text-white text-xs"></i></button>
+                                </div>
+                            </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    <div class="mt-6 mb-4">
+                        <button onclick="window.updateStocktakeDate()" class="w-full bg-blue-100 text-blue-600 py-4 rounded-xl font-bold shadow-sm active:scale-95 flex justify-center items-center gap-2 border border-blue-200">
+                            <i class="fas fa-check-double text-xl"></i>
+                            <span>確認盤點完成</span>
+                        </button>
+                        <p class="text-center text-xs text-gray-400 mt-2">將記錄今日 (${new Date().toLocaleDateString('zh-TW', {month:'2-digit', day:'2-digit'})}) 為最後盤點日</p>
+                    </div>
+                `;
+            } 
+            
+            else if (state.activeTab === 'history') {
+                html += `
+                    <div class="flex justify-between items-center mb-4 px-1">
+                        <h2 class="font-bold text-lg text-gray-800">出入庫紀錄 (最新50筆)</h2>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+                        ${state.logs.length === 0 ? '<div class="p-8 text-center text-gray-400">無紀錄</div>' : ''}
+                        <div class="divide-y divide-gray-100">
+                            ${state.logs.map(log => `
+                                <div class="p-3 flex justify-between items-center group">
+                                    <div class="flex items-center gap-3 flex-1">
+                                        <div class="w-8 h-8 rounded-full flex items-center justify-center ${log.change > 0 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}">
+                                            <i class="fas ${log.change > 0 ? 'fa-arrow-down transform rotate-180' : 'fa-arrow-down'} text-xs"></i>
+                                        </div>
+                                        <div>
+                                            <div class="font-bold text-sm text-gray-800">${log.itemName}</div>
+                                            <div class="text-[10px] text-gray-400">${log.timeStr}</div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right flex items-center gap-4">
+                                        <div>
+                                            <div class="font-bold ${log.change > 0 ? 'text-green-600' : 'text-orange-600'}">${log.change > 0 ? '+' : ''}${log.change}</div>
+                                            <div class="text-[10px] text-gray-400">餘: ${log.finalStock}</div>
+                                        </div>
+                                        <button onclick="window.deleteLog('${log.id}')" class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            else if (state.activeTab === 'admin') {
+                html += `
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                         <div class="bg-purple-600 text-white p-4 rounded-xl shadow-md flex flex-col justify-between">
+                            <div>
+                                <h2 class="font-bold text-lg">商品管理</h2>
+                                <p class="text-xs text-purple-200">新增或修改</p>
+                            </div>
+                            <button onclick="window.openEditModal()" class="mt-2 bg-white text-purple-600 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm active:scale-95 self-start">
+                                <i class="fas fa-plus"></i> 新增
+                            </button>
+                        </div>
+                        <button onclick="window.openStats()" class="bg-indigo-500 text-white p-4 rounded-xl shadow-md flex flex-col justify-between items-start active:scale-95">
+                            <div>
+                                <h2 class="font-bold text-lg">統計報表</h2>
+                                <p class="text-xs text-indigo-200">合併計算與查詢</p>
+                            </div>
+                            <div class="mt-2 text-2xl opacity-50"><i class="fas fa-chart-line"></i></div>
+                        </button>
+                    </div>
+                `;
+
+                if (state.showStats) {
+                    let secondSelectHTML = '';
+                    if (state.statsFilter.type === 'category') {
+                        const cats = [...new Set(state.inventory.map(i => i.category))];
+                        secondSelectHTML = `
+                            <select onchange="window.updateStatsValue(this.value)" class="flex-1 border rounded px-2 py-1 bg-white">
+                                ${cats.map(c => `<option value="${c}" ${state.statsFilter.value === c ? 'selected' : ''}>${c}</option>`).join('')}
+                            </select>
+                        `;
+                    } else if (state.statsFilter.type === 'item') {
+                         const items = state.inventory.map(i => i.name).sort();
+                         secondSelectHTML = `
+                            <select onchange="window.updateStatsValue(this.value)" class="flex-1 border rounded px-2 py-1 bg-white">
+                                ${items.map(n => `<option value="${n}" ${state.statsFilter.value === n ? 'selected' : ''}>${n}</option>`).join('')}
+                            </select>
+                        `;
+                    } else {
+                        secondSelectHTML = `<select class="flex-1 border rounded px-2 py-1 bg-gray-100 text-gray-400" disabled><option>全部顯示</option></select>`;
+                    }
+
+                    html += `
+                        <div class="modal-overlay">
+                            <div class="modal-content animate-fade-in-up">
+                                <div class="p-4 border-b border-gray-100 flex justify-between items-center flex-none">
+                                    <h3 class="font-bold text-lg">📊 歷史紀錄查詢</h3>
+                                    <button onclick="window.closeStats()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                                </div>
+                                
+                                <div class="p-3 bg-gray-50 border-b border-gray-100 space-y-2 text-sm">
+                                    <div class="flex gap-2">
+                                        <input type="date" value="${state.statsFilter.start}" onchange="window.state.statsFilter.start=this.value" class="flex-1 border rounded px-2 py-1">
+                                        <span class="text-gray-400 self-center">~</span>
+                                        <input type="date" value="${state.statsFilter.end}" onchange="window.state.statsFilter.end=this.value" class="flex-1 border rounded px-2 py-1">
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <select onchange="window.updateStatsType(this.value)" class="w-1/3 border rounded px-2 py-1 bg-white">
+                                            <option value="all" ${state.statsFilter.type === 'all' ? 'selected' : ''}>全部</option>
+                                            <option value="category" ${state.statsFilter.type === 'category' ? 'selected' : ''}>依分類</option>
+                                            <option value="item" ${state.statsFilter.type === 'item' ? 'selected' : ''}>依品項</option>
+                                        </select>
+                                        ${secondSelectHTML}
+                                        <button onclick="window.runStatsQuery()" class="bg-indigo-500 text-white px-3 py-1 rounded font-bold">查詢</button>
+                                    </div>
+                                </div>
+
+                                <div class="p-4 overflow-y-auto flex-1">
+                                    ${!state.statsData ? '<div class="text-center py-10"><i class="fas fa-circle-notch fa-spin text-blue-500"></i> 計算中...</div>' : 
+                                      state.statsData.length === 0 ? '<div class="text-center py-10 text-gray-400">此區間無資料</div>' :
+                                      `
+                                      <table class="w-full text-sm">
+                                        <thead>
+                                            <tr class="text-gray-400 border-b">
+                                                <th class="text-left pb-2 font-normal">日期</th>
+                                                <th class="text-left pb-2 font-normal">品名</th>
+                                                <th class="text-right pb-2 font-normal text-gray-800">異動</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-50">
+                                            ${state.statsData.map(d => `
+                                                <tr>
+                                                    <td class="py-2 text-gray-400 text-xs">${d.date}</td>
+                                                    <td class="py-2 font-bold text-gray-700">
+                                                        ${d.name}
+                                                        ${d.in > 0 && d.out > 0 ? `<div class="text-[10px] text-gray-400">進${d.in}/出${d.out}</div>` : ''}
+                                                    </td>
+                                                    <td class="py-2 text-right">
+                                                        ${d.in > 0 ? `<span class="text-green-600">+${d.in}</span>` : ''}
+                                                        ${d.in > 0 && d.out > 0 ? ' / ' : ''}
+                                                        ${d.out > 0 ? `<span class="text-orange-600">-${d.out}</span>` : ''}
+                                                    </td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                      </table>
+                                      `
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (state.editingId) {
+                    html += `
+                        <div class="modal-overlay">
+                            <div class="modal-content animate-fade-in-up">
+                                <div class="p-4 border-b border-gray-100 flex justify-between items-center flex-none">
+                                    <h3 class="font-bold text-lg text-center">${state.editingId === 'NEW' ? '新增商品' : '編輯商品'}</h3>
+                                    <button onclick="window.cancelEdit()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                                </div>
+                                
+                                <div class="p-5 overflow-y-auto flex-1">
+                                    <div class="space-y-4">
+                                        <div class="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label class="block text-xs font-bold text-gray-500 mb-1">分類</label>
+                                                <input type="text" placeholder="例如：貓用" value="${state.editForm.category||''}" oninput="window.state.editForm.category=this.value" class="w-full bg-gray-100 rounded-lg p-2.5 text-sm">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-bold text-gray-500 mb-1">單位</label>
+                                                <input type="text" placeholder="例如：包" value="${state.editForm.unit||''}" oninput="window.state.editForm.unit=this.value" class="w-full bg-gray-100 rounded-lg p-2.5 text-sm">
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-gray-500 mb-1">品名</label>
+                                            <input type="text" placeholder="商品名稱" value="${state.editForm.name||''}" oninput="window.state.editForm.name=this.value" class="w-full bg-gray-100 rounded-lg p-2.5 text-sm">
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label class="block text-xs font-bold text-gray-500 mb-1">目前庫存</label>
+                                                <input type="number" value="${state.editForm.stock}" oninput="window.state.editForm.stock=this.value" class="w-full bg-gray-100 rounded-lg p-2.5 text-sm">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-bold text-gray-500 mb-1">安全存量</label>
+                                                <input type="number" value="${state.editForm.safety}" oninput="window.state.editForm.safety=this.value" class="w-full bg-gray-100 rounded-lg p-2.5 text-sm">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="p-4 border-t border-gray-100 flex gap-2 flex-none bg-white rounded-b-xl">
+                                    <button onclick="window.cancelEdit()" class="flex-1 py-3 text-gray-500 bg-gray-100 rounded-lg font-bold">取消</button>
+                                    <button onclick="window.saveEdit()" class="flex-1 py-3 text-white bg-purple-600 rounded-lg font-bold shadow-md active:scale-95 transition-transform">儲存</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `<div class="bg-white rounded-xl shadow-sm overflow-hidden divide-y divide-gray-100">`;
+                state.inventory.forEach(item => {
+                    const itemStr = encodeURIComponent(JSON.stringify(item));
+                    html += `
+                    <div class="p-3 flex justify-between items-center">
+                        <div>
+                            <span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded mr-1">${item.category}</span>
+                            <span class="text-sm font-bold text-gray-800">${item.name}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="window.openEditModal('${itemStr}')" class="p-1.5 text-blue-500 bg-blue-50 rounded hover:bg-blue-100"><i class="fas fa-edit text-xs"></i></button>
+                            <button onclick="window.deleteItem('${item.id}')" class="p-1.5 text-red-500 bg-red-50 rounded hover:bg-red-100"><i class="fas fa-trash text-xs"></i></button>
+                        </div>
+                    </div>
+                    `;
+                });
+                html += `</div>`;
+            }
+
+            mainContent.innerHTML = html;
+        };
+    </script>
+</body>
+</html>
