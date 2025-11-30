@@ -122,7 +122,7 @@
         const APP_PASSWORD = "2169"; 
 
         const firebaseConfig = {
-          apiKey: "AIzaSyBXMjjqMz6JVkyACvndahKeKTGHRmeVZ8Q",
+               apiKey: "AIzaSyBXMjjqMz6JVkyACvndahKeKTGHRmeVZ8Q",
                 authDomain: "mystockapp-b9c09.firebaseapp.com",
                 projectId: "mystockapp-b9c09",
                 storageBucket: "mystockapp-b9c09.firebasestorage.app",
@@ -134,26 +134,18 @@
         // ============================================================
 
         // --- Utils: 顏色處理 ---
-        // 1. 定義可選顏色表 (Key -> Tailwind Class)
         const COLOR_PALETTE = {
-            'red': 'bg-red-100 text-red-600',
-            'orange': 'bg-orange-100 text-orange-600',
-            'amber': 'bg-amber-100 text-amber-600',
-            'green': 'bg-emerald-100 text-emerald-600',
-            'blue': 'bg-blue-100 text-blue-600',
-            'purple': 'bg-violet-100 text-violet-600',
-            'pink': 'bg-pink-100 text-pink-600',
-            'gray': 'bg-gray-100 text-gray-600'
+            'red': 'bg-red-100 text-red-600', 'orange': 'bg-orange-100 text-orange-600', 'amber': 'bg-amber-100 text-amber-600',
+            'green': 'bg-emerald-100 text-emerald-600', 'blue': 'bg-blue-100 text-blue-600', 'purple': 'bg-violet-100 text-violet-600',
+            'pink': 'bg-pink-100 text-pink-600', 'gray': 'bg-gray-100 text-gray-600'
         };
 
-        // 2. 顯示用的顏色球樣式 (Key -> Tailwind BG)
         const COLOR_BG = {
             'red': 'bg-red-500', 'orange': 'bg-orange-500', 'amber': 'bg-amber-500',
             'green': 'bg-emerald-500', 'blue': 'bg-blue-500', 'purple': 'bg-violet-500',
             'pink': 'bg-pink-500', 'gray': 'bg-gray-500'
         };
 
-        // 3. 自動雜湊顏色 (如果沒選顏色的備案)
         const getAutoColor = (str) => {
             const keys = Object.keys(COLOR_PALETTE);
             let hash = 0;
@@ -161,7 +153,6 @@
             return COLOR_PALETTE[keys[Math.abs(hash) % keys.length]];
         };
 
-        // 4. 取得最終顏色 (優先使用指定的 colorKey)
         const getItemColor = (item) => {
             if (item.colorKey && COLOR_PALETTE[item.colorKey]) {
                 return COLOR_PALETTE[item.colorKey];
@@ -185,7 +176,9 @@
                 statsData: [],
                 statsFilter: { start: '', end: '', type: 'all', value: '' },
                 showUsageModal: false,
-                usageResult: null
+                usageResult: null,
+                // 新增：用量計算機的暫存狀態 (預設值)
+                usageFormState: { itemId: '', days: '7', type: 'avg_usage' } 
             },
 
             // 1. 登入檢查
@@ -286,18 +279,23 @@
                 if(confirm("刪除此紀錄？")) await deleteDoc(doc(app.db, 'inventory_logs', id));
             },
 
-            // --- 計算用量 (修復版: 用戶端排序) ---
+            // --- 計算用量 (修復版) ---
             openUsageModal: () => {
                 app.state.showUsageModal = true;
                 app.state.usageResult = null;
+                // 不重置 usageFormState，讓它保持上次選擇的狀態
                 app.render();
             },
             
             calculateUsage: async () => {
+                // 1. 抓取當前 DOM 的值
                 const itemId = document.getElementById('usage-item').value;
                 const days = parseInt(document.getElementById('usage-days').value);
                 const type = document.getElementById('usage-type').value; 
                 
+                // 2. 存回 state，這樣 render 時可以選回去
+                app.state.usageFormState = { itemId, days, type };
+
                 if (!itemId) return alert("請選擇商品");
 
                 const endDate = new Date();
@@ -305,11 +303,9 @@
                 startDate.setDate(endDate.getDate() - days);
                 
                 try {
-                    // 修正：不使用 orderBy 以避免需要建立索引。改為只抓取該商品的資料，然後在前端排序。
                     const q = query(collection(app.db, 'inventory_logs'), where("itemId", "==", itemId));
                     const snapshot = await getDocs(q);
                     
-                    // 前端處理：篩選日期範圍 + 排序 (新到舊)
                     const logs = snapshot.docs
                         .map(d => d.data())
                         .filter(data => data.timestamp && data.timestamp.toDate() >= startDate && data.timestamp.toDate() <= endDate)
@@ -391,27 +387,22 @@
                 app.render();
             },
 
-            // 管理：新增與編輯
             openEditModal: (itemStr) => {
                 app.state.editingId = itemStr ? JSON.parse(decodeURIComponent(itemStr)).id : 'NEW';
-                // 初始化 form，如果沒有 colorKey 就預設空 (render時會自動 fallback)
                 app.state.editForm = itemStr ? JSON.parse(decodeURIComponent(itemStr)) : { category: '日常', name: '', stock: 0, safety: 1, unit: '個', colorKey: '' };
                 app.render();
             },
             saveEdit: async () => {
                 const form = app.state.editForm;
                 if(!form.name) return alert("請輸入名稱");
-                
-                // 儲存欄位包含 colorKey
                 const data = { 
                     category: form.category, 
                     name: form.name, 
                     stock: parseInt(form.stock), 
                     safety: parseInt(form.safety), 
                     unit: form.unit,
-                    colorKey: form.colorKey || '' // 儲存顏色代碼
+                    colorKey: form.colorKey || '' 
                 };
-
                 try {
                     if(app.state.editingId === 'NEW') await addDoc(collection(app.db, 'inventory_items'), data);
                     else await updateDoc(doc(app.db, 'inventory_items', app.state.editingId), data);
@@ -480,20 +471,19 @@
                 }
 
                 // ===================================
-                // 2. 庫存 (現有庫存標題 - 風格一致化)
+                // 2. 庫存 (修改重點：盤點日期對比色)
                 // ===================================
                 else if (state.activeTab === 'inventory') {
                     const cats = ['全部', ...new Set(state.inventory.map(i => i.category))];
                     const filtered = state.inventory.filter(i => (i.name.toLowerCase().includes(state.searchTerm.toLowerCase())) && (state.selectedCategory === '全部' || i.category === state.selectedCategory));
                     
-                    // 標題卡片：改為跟購物清單一樣的卡片風格 (Emerald/Teal 漸層)
                     html += `
                     <div class="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-6 rounded-3xl shadow-lg shadow-emerald-200 mb-6 flex justify-between items-center relative overflow-hidden">
-                        <div class="relative z-10">
-                            <h2 class="font-bold text-2xl">現有庫存</h2>
-                            <div class="text-xs text-emerald-100 mt-1 opacity-80 flex items-center gap-2">
-                                <span>最後盤點：</span>
-                                <span class="font-bold bg-white/20 px-2 rounded">${state.lastStocktake || "--/--"}</span>
+                        <div class="relative z-10 w-full">
+                            <h2 class="font-bold text-2xl mb-2">現有庫存</h2>
+                            <div>
+                                <div class="text-emerald-100 text-[10px] font-bold tracking-wider uppercase opacity-90 mb-0.5">最後盤點日期</div>
+                                <div class="font-black text-3xl text-yellow-300 drop-shadow-sm font-mono tracking-tight">${state.lastStocktake || "--/--"}</div>
                             </div>
                         </div>
                         <i class="fas fa-boxes text-6xl opacity-10 absolute -right-2 -bottom-4 rotate-12"></i>
@@ -612,7 +602,7 @@
 
                     // Modal 1: 統計
                     if(state.showStats) {
-                        /* (統計代碼與之前類似) */
+                        /* (統計代碼省略，保持原樣) */
                         let selHTML = '';
                         if(state.statsFilter.type === 'category') {
                             const cats = [...new Set(state.inventory.map(i=>i.category))];
@@ -625,7 +615,7 @@
                         html += `<div class="modal-overlay animate-fade-in-up"><div class="modal-content"><div class="p-5 border-b border-slate-50 flex justify-between items-center bg-white"><h3 class="font-bold text-lg text-slate-800">📊 統計報表</h3><button onclick="app.state.showStats=false; app.render()" class="w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button></div><div class="p-4 bg-white space-y-3"><div class="flex gap-2"><input type="date" value="${state.statsFilter.start}" onchange="app.state.statsFilter.start=this.value" class="flex-1 border-0 bg-slate-100 rounded-xl px-2 py-2 text-xs font-bold text-slate-600 text-center"><span class="text-slate-300 self-center">~</span><input type="date" value="${state.statsFilter.end}" onchange="app.state.statsFilter.end=this.value" class="flex-1 border-0 bg-slate-100 rounded-xl px-2 py-2 text-xs font-bold text-slate-600 text-center"></div><div class="flex gap-2"><select onchange="app.updateStatsType(this.value)" class="w-1/3 border-0 bg-slate-100 rounded-xl px-2 py-2 text-xs font-bold text-slate-600"><option value="all" ${state.statsFilter.type==='all'?'selected':''}>全部</option><option value="category" ${state.statsFilter.type==='category'?'selected':''}>分類</option><option value="item" ${state.statsFilter.type==='item'?'selected':''}>品項</option></select>${selHTML}<button onclick="app.runStatsQuery()" class="bg-indigo-500 text-white w-12 rounded-xl font-bold shadow-md shadow-indigo-200"><i class="fas fa-search"></i></button></div></div><div class="p-4 overflow-y-auto flex-1 bg-white">${!state.statsData ? '<div class="text-center py-10"><i class="fas fa-circle-notch fa-spin text-blue-500"></i></div>' : state.statsData.length===0 ? '<div class="text-center py-10 text-slate-300">無資料</div>' : `<table class="w-full text-sm"><thead><tr class="text-slate-400 border-b border-slate-50"><th class="text-left pb-2 font-normal pl-2">日期</th><th class="text-left pb-2 font-normal">品名</th><th class="text-right pb-2 font-normal pr-2">異動</th></tr></thead><tbody class="divide-y divide-slate-50">${state.statsData.map(d=>`<tr><td class="py-3 text-slate-400 text-xs pl-2">${d.date}</td><td class="py-3 font-bold text-slate-700">${d.name}</td><td class="py-3 text-right pr-2">${d.in>0?`<span class="text-green-500 font-bold">+${d.in}</span>`:''}${d.in>0&&d.out>0?' / ':''}${d.out>0?`<span class="text-orange-500 font-bold">-${d.out}</span>`:''}</td></tr>`).join('')}</tbody></table>`}</div></div></div>`;
                     }
 
-                    // Modal 2: 編輯 (加入顏色選擇)
+                    // Modal 2: 編輯 (顏色選擇器)
                     if(state.editingId) {
                         html += `<div class="modal-overlay animate-fade-in-up"><div class="modal-content"><div class="p-5 border-b border-slate-50 flex justify-between items-center bg-white"><h3 class="font-bold text-lg text-slate-800">${state.editingId==='NEW'?'新增物品':'編輯物品'}</h3><button onclick="app.state.editingId=null; app.render()" class="w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button></div><div class="p-6 overflow-y-auto flex-1 bg-white"><div class="space-y-4">
                         
@@ -653,7 +643,7 @@
                         </div></div><div class="p-4 border-t border-slate-50 flex gap-3 flex-none bg-white"><button onclick="app.state.editingId=null; app.render()" class="flex-1 py-3 text-slate-500 bg-slate-100 rounded-2xl font-bold">取消</button><button onclick="app.saveEdit()" class="flex-1 py-3 text-white bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl font-bold shadow-lg shadow-blue-200">儲存</button></div></div></div>`;
                     }
 
-                    // Modal 3: 用量計算
+                    // Modal 3: 用量計算 (修改重點：帶入 usageFormState 讓選項選回去)
                     if(state.showUsageModal) {
                         const items = state.inventory.map(i=>i.name).sort();
                         html += `
@@ -667,28 +657,32 @@
                                     <div>
                                         <label class="block text-xs font-bold text-slate-400 mb-2 ml-1">選擇商品</label>
                                         <select id="usage-item" class="w-full bg-slate-50 border-0 rounded-2xl p-3 text-sm font-bold text-slate-700">
-                                            ${items.map(n => `<option value="${state.inventory.find(i=>i.name===n).id}">${n}</option>`).join('')}
+                                            ${items.map(n => {
+                                                const i = state.inventory.find(item=>item.name===n);
+                                                const isSel = state.usageFormState.itemId === i.id ? 'selected' : '';
+                                                return `<option value="${i.id}" ${isSel}>${n}</option>`;
+                                            }).join('')}
                                         </select>
                                     </div>
                                     <div class="grid grid-cols-2 gap-3">
                                         <div>
                                             <label class="block text-xs font-bold text-slate-400 mb-2 ml-1">計算天數</label>
                                             <select id="usage-days" class="w-full bg-slate-50 border-0 rounded-2xl p-3 text-sm font-bold text-slate-700">
-                                                <option value="7">7天</option>
-                                                <option value="14">14天</option>
-                                                <option value="28">28天</option>
-                                                <option value="90">90天</option>
+                                                <option value="7" ${state.usageFormState.days==='7'?'selected':''}>7天</option>
+                                                <option value="14" ${state.usageFormState.days==='14'?'selected':''}>14天</option>
+                                                <option value="28" ${state.usageFormState.days==='28'?'selected':''}>28天</option>
+                                                <option value="90" ${state.usageFormState.days==='90'?'selected':''}>90天</option>
                                             </select>
                                         </div>
                                         <div>
                                             <label class="block text-xs font-bold text-slate-400 mb-2 ml-1">計算方式</label>
                                             <select id="usage-type" class="w-full bg-slate-50 border-0 rounded-2xl p-3 text-sm font-bold text-slate-700">
-                                                <option value="avg_usage">平均用量</option>
-                                                <option value="days_per_unit">消耗1個需幾天</option>
+                                                <option value="avg_usage" ${state.usageFormState.type==='avg_usage'?'selected':''}>平均用量</option>
+                                                <option value="days_per_unit" ${state.usageFormState.type==='days_per_unit'?'selected':''}>消耗1個需幾天</option>
                                             </select>
                                         </div>
                                     </div>
-                                    <button onclick="app.calculateUsage()" class="w-full bg-emerald-500 text-white py-3 rounded-2xl font-bold shadow-lg shadow-emerald-200 mt-2">開始計算</button>
+                                    <button onclick="app.calculateUsage()" class="w-full bg-emerald-500 text-white py-3 rounded-2xl font-bold shadow-lg shadow-emerald-200 mt-2 active:scale-95 transition-transform">開始計算</button>
                                     
                                     ${state.usageResult ? `
                                     <div class="mt-4 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-center animate-fade-in-up">
